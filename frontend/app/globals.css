@@ -1,0 +1,195 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..900;1,14..32,300..900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── CSS Custom Properties ───────────────────────────────────────────────── */
+:root {
+  --bg-primary: #080810;
+  --bg-card: #10101c;
+  --bg-card-hover: #18182a;
+  --border-subtle: #1e1e32;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
+}
+
+/* ─── Base ────────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  /* Prevent zoom on input focus on iOS */
+  touch-action: manipulation;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Custom Scrollbar ────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-card);
+}
+::-webkit-scrollbar-thumb {
+  background: #3730a3;
+  border-radius: 2px;
+}
+
+/* ─── Keyframe Animations ─────────────────────────────────────────────────── */
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 15px rgba(245, 158, 11, 0.45); }
+  50%       { box-shadow: 0 0 45px rgba(245, 158, 11, 0.95), 0 0 80px rgba(245, 158, 11, 0.25); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes nightPulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes cardFlip {
+  0%   { transform: rotateY(0deg); }
+  100% { transform: rotateY(180deg); }
+}
+
+/* ─── Utility Classes ─────────────────────────────────────────────────────── */
+
+.animate-pulse-glow {
+  animation: pulseGlow 1.5s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out both;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out both;
+}
+
+.animate-night-pulse {
+  animation: nightPulse 2s ease-in-out infinite;
+}
+
+/* Gradient shimmer text */
+.text-shimmer {
+  background: linear-gradient(90deg, #7c3aed, #a855f7, #ec4899, #7c3aed);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 3s linear infinite;
+}
+
+/* Glass card */
+.glass-card {
+  background: rgba(16, 16, 28, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Ambient background gradient for landing */
+.ambient-bg {
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(124, 58, 237, 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(236, 72, 153, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse at 50% 100%, rgba(59, 130, 246, 0.05) 0%, transparent 60%),
+    #080810;
+}
+
+/* Night phase ambient */
+.night-bg {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(30, 27, 75, 0.6) 0%, transparent 70%),
+    radial-gradient(ellipse at 50% 100%, rgba(14, 14, 30, 0.8) 0%, transparent 70%),
+    #050508;
+}
+
+/* Day phase ambient */
+.day-bg {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(245, 158, 11, 0.06) 0%, transparent 70%),
+    #080810;
+}
+
+/* Card flip (3D role reveal) */
+.card-scene {
+  perspective: 800px;
+}
+
+.card-inner {
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+  position: relative;
+}
+
+.card-inner.flipped {
+  transform: rotateY(180deg);
+}
+
+.card-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.card-back {
+  transform: rotateY(180deg);
+  position: absolute;
+  inset: 0;
+}
+
+/* Thumb-friendly base button */
+.btn-base {
+  @apply relative flex items-center justify-center gap-2 font-semibold rounded-2xl
+         transition-all duration-150 active:scale-95 select-none cursor-pointer;
+  min-height: 52px;
+  touch-action: manipulation;
+}
+
+/* Progress ring SVG */
+.progress-ring-circle {
+  transition: stroke-dashoffset 0.05s linear;
+  transform-origin: center;
+  transform: rotate(-90deg);
+}
