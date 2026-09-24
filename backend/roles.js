@@ -233,29 +233,32 @@ function resolveVote(room) {
     return { executedId, jesterWin: true, tied: false, reason: null };
   }
 
-  // Execute player
+  // Execute player (Godfather succession is handled by ensureLivingBoss)
   executed.isAlive = false;
-
-  // Godfather boss promotion: if the Boss was just eliminated, pick a new one
-  if (executed.role === ROLES.IMPOSTER && executed.isBoss) {
-    executed.isBoss = false;
-    promoteNewBoss(room);
-  }
 
   return { executedId, jesterWin: false, tied: false, reason: null };
 }
 
 /**
- * Promote a random living Accomplice to Boss.
+ * Godfather mode: if the Boss is gone (voted out, killed, or fled), promote a
+ * random living Accomplice. Call after ANY elimination.
+ *
+ * @param {object} room
+ * @returns {boolean} true if a new Boss was promoted (roles must be re-sent)
  */
-function promoteNewBoss(room) {
-  const accomplices = [...room.players.values()].filter(
-    (p) => p.isAlive && p.role === ROLES.IMPOSTER && !p.isBoss
-  );
-  if (accomplices.length > 0) {
-    const newBoss = accomplices[Math.floor(Math.random() * accomplices.length)];
-    newBoss.isBoss = true;
-  }
+function ensureLivingBoss(room) {
+  if (room.config.imposterMode !== 'godfather') return false;
+
+  const imposters = [...room.players.values()].filter((p) => p.role === ROLES.IMPOSTER);
+  const living = imposters.filter((p) => p.isAlive);
+  if (living.length === 0 || living.some((p) => p.isBoss)) return false;
+
+  // Strip the crown from any dead Boss so teammates never see two
+  for (const p of imposters) p.isBoss = false;
+
+  const newBoss = living[Math.floor(Math.random() * living.length)];
+  newBoss.isBoss = true;
+  return true;
 }
 
 /**
@@ -286,5 +289,6 @@ module.exports = {
   assignRoles,
   resolveNight,
   resolveVote,
+  ensureLivingBoss,
   checkWinCondition,
 };

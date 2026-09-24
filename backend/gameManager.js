@@ -10,6 +10,7 @@ const {
   assignRoles,
   resolveNight,
   resolveVote,
+  ensureLivingBoss,
   checkWinCondition,
 } = require('./roles');
 
@@ -140,6 +141,19 @@ function buildPrivateRolePacket(player, room) {
   return { role: player.role, isBoss: player.isBoss, teammates };
 }
 
+/**
+ * After any elimination: promote a new Godfather if needed and re-send the
+ * private role packet to every imposter so the crown shows up on their screens.
+ */
+function refreshBoss(io, room) {
+  if (!ensureLivingBoss(room)) return;
+  for (const p of room.players.values()) {
+    if (p.role !== ROLES.IMPOSTER) continue;
+    const sock = io.sockets.sockets.get(p.socketId);
+    if (sock) sock.emit('private_role_assign', buildPrivateRolePacket(p, room));
+  }
+}
+
 // ─── Phase transition helpers ─────────────────────────────────────────────────
 
 function startNightPhase(io, room) {
@@ -183,6 +197,7 @@ function startNightPhase(io, room) {
 
 function resolveNightPhase(io, room) {
   const { killed, saved } = resolveNight(room);
+  refreshBoss(io, room);
 
   // Build public resolution (respect revealMode)
   const killedInfo = killed.map((id) => {
@@ -243,6 +258,7 @@ function resolveVotePhase(io, room) {
     endGame(io, room, 'jester', 'The Jester tricked the town!', jester?.name);
     return;
   }
+  refreshBoss(io, room);
 
   const executedPlayer = executedId ? room.players.get(executedId) : null;
   const resolution = {
@@ -281,8 +297,14 @@ function resolveVotePhase(io, room) {
 function endGame(io, room, winner, reason, jesterName = null) {
   room.winner = winner;
   room.phase = 'game_over';
+  room.gameOverReason = reason;
+  room.gameOverJesterName = jesterName;
 
-  // Full role reveal on game over — intentional broadcast
+  io.to(room.code).emit('game_over', buildGameOverPayload(room));
+}
+
+/** Full role reveal on game over — intentional broadcast (also re-sent on reconnect) */
+function buildGameOverPayload(room) {
   const players = [...room.players.values()].map((p) => ({
     id: p.id,
     name: p.name,
@@ -297,13 +319,13 @@ function endGame(io, room, winner, reason, jesterName = null) {
     hasCompletedDecoys: p.hasCompletedDecoys,
   }));
 
-  io.to(room.code).emit('game_over', {
-    winner,
-    reason,
-    jesterName,
+  return {
+    winner: room.winner,
+    reason: room.gameOverReason,
+    jesterName: room.gameOverJesterName,
     players,
     roomState: getPublicRoomState(room),
-  });
+  };
 }
 
 // ─── Socket.io handler setup ──────────────────────────────────────────────────
@@ -311,8 +333,25 @@ function setupSocketHandlers(io) {
   io.on('connection', (socket) => {
     console.log(`[+] Socket connected: ${socket.id}`);
 
+    // Register a handler that tolerates missing/malformed payloads and never
+    // lets an exception escape — one bad message must not crash the server.
+    const on = (event, handler) => {
+      socket.on(event, (payload) => {
+        try {
+          handler(payload && typeof payload === 'object' ? payload : {});
+        } catch (err) {
+          console.error(`[!] Handler "${event}" failed:`, err);
+        }
+      });
+    };
+
     // ── create_room ────────────────────────────────────────────────────────
-    socket.on('create_room', ({ playerName, customRoomCode }) => {
+    on('create_room', ({ playerName, customRoomCode }) => {
+      const hostName = String(playerName || '').trim().slice(0, 12);
+      if (!hostName) {
+        socket.emit('error_event', { message: 'Please enter a name.' });
+        return;
+      }
       let code;
       const custom = String(customRoomCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 
@@ -331,7 +370,7 @@ function setupSocketHandlers(io) {
 
       const hostPlayer = {
         id: playerId,
-        name: String(playerName).slice(0, 12),
+        name: hostName,
         socketId: socket.id,
         color: theme.color,
         animal: theme.animal,
@@ -376,11 +415,11 @@ function setupSocketHandlers(io) {
         roomState: getPublicRoomState(room),
       });
 
-      console.log(`[Room] Created ${code} by ${hostPlayer.name}`);
+      console.log(`[Room] Created ${code} by ${hostName}`);
     });
 
     // ── join_room ──────────────────────────────────────────────────────────
-    socket.on('join_room', ({ playerName, roomCode }) => {
+    on('join_room', ({ playerName, roomCode }) => {
       const code = String(roomCode).toUpperCase().trim();
       const room = rooms.get(code);
 
@@ -397,7 +436,11 @@ function setupSocketHandlers(io) {
         return;
       }
 
-      const nameTrimmed = String(playerName || '').trim();
+      const nameTrimmed = String(playerName || '').trim().slice(0, 12);
+      if (!nameTrimmed) {
+        socket.emit('error_event', { message: 'Please enter a name.' });
+        return;
+      }
       const nameLower = nameTrimmed.toLowerCase();
       const isNameTaken = [...room.players.values()].some(
         (p) => p.name.trim().toLowerCase() === nameLower
@@ -415,7 +458,7 @@ function setupSocketHandlers(io) {
 
       const newPlayer = {
         id: playerId,
-        name: String(playerName).slice(0, 12),
+        name: nameTrimmed,
         socketId: socket.id,
         color: theme.color,
         animal: theme.animal,
@@ -448,7 +491,7 @@ function setupSocketHandlers(io) {
     });
 
     // ── reconnect_session ──────────────────────────────────────────────────
-    socket.on('reconnect_session', ({ playerId, roomCode }) => {
+    on('reconnect_session', ({ playerId, roomCode }) => {
       const code = String(roomCode || '').toUpperCase().trim();
       const room = rooms.get(code);
 
@@ -487,16 +530,22 @@ function setupSocketHandlers(io) {
             socket.emit('awaiting_action', { role: player.role });
           }
         }
+
+        // Game over: re-send the full reveal so a refreshed page isn't blank
+        if (room.phase === 'game_over') {
+          socket.emit('game_over', buildGameOverPayload(room));
+        }
       }
 
       console.log(`[Room] ${player.name} reconnected to ${code}`);
     });
 
     // ── update_config ──────────────────────────────────────────────────────
-    socket.on('update_config', ({ roomCode, playerId, config }) => {
+    on('update_config', ({ roomCode, playerId, config = {} }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.hostId !== playerId || room.phase !== 'lobby') return;
+      if (!config || typeof config !== 'object') return;
 
       const current = room.config || {
         imposterCount: 1,
@@ -535,7 +584,7 @@ function setupSocketHandlers(io) {
     });
 
     // ── start_game ─────────────────────────────────────────────────────────
-    socket.on('start_game', ({ roomCode, playerId }) => {
+    on('start_game', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
 
@@ -585,7 +634,7 @@ function setupSocketHandlers(io) {
 
     // ── advance_to_night ───────────────────────────────────────────────────
     // Host advances: role_reveal → night, OR day_announce(vote) → night
-    socket.on('advance_to_night', ({ roomCode, playerId }) => {
+    on('advance_to_night', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.hostId !== playerId) return;
@@ -599,7 +648,7 @@ function setupSocketHandlers(io) {
 
     // ── advance_to_vote ────────────────────────────────────────────────────
     // Host advances: day_announce(night) → day_vote
-    socket.on('advance_to_vote', ({ roomCode, playerId }) => {
+    on('advance_to_vote', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.hostId !== playerId) return;
@@ -630,7 +679,7 @@ function setupSocketHandlers(io) {
 
     // ── decoy_sequence_complete ────────────────────────────────────────────
     // Client fires once after completing all local decoy taps (optimistic UI)
-    socket.on('decoy_sequence_complete', ({ roomCode, playerId }) => {
+    on('decoy_sequence_complete', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.phase !== 'night') return;
@@ -653,7 +702,7 @@ function setupSocketHandlers(io) {
 
     // ── submit_night_action ────────────────────────────────────────────────
     // targetId: string (kill/heal target) | null (sleep / skip)
-    socket.on('submit_night_action', ({ roomCode, playerId, targetId }) => {
+    on('submit_night_action', ({ roomCode, playerId, targetId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.phase !== 'night') return;
@@ -674,6 +723,10 @@ function setupSocketHandlers(io) {
         const target = room.players.get(targetId);
         if (!target || !target.isAlive) {
           socket.emit('error_event', { message: 'Invalid target.' });
+          return;
+        }
+        if (player.role === ROLES.IMPOSTER && target.role === ROLES.IMPOSTER) {
+          socket.emit('error_event', { message: "You can't target your own teammate." });
           return;
         }
       }
@@ -753,8 +806,8 @@ function setupSocketHandlers(io) {
       }
     };
 
-    socket.on('submit_day_vote', handleSubmitVote);
-    socket.on('submit_vote', handleSubmitVote);
+    on('submit_day_vote', handleSubmitVote);
+    on('submit_vote', handleSubmitVote);
 
     // ── call_end_game / declare_victory ────────────────────────────────────
     // Only available when revealMode === 'secret'. Threshold is >50% of living players.
@@ -809,13 +862,13 @@ function setupSocketHandlers(io) {
       }
     };
 
-    socket.on('call_end_game', handleDeclareVictory);
-    socket.on('declare_victory', handleDeclareVictory);
+    on('call_end_game', handleDeclareVictory);
+    on('declare_victory', handleDeclareVictory);
 
     // ── force_end_night ─────────────────────────────────────────────────────
     // Host-only admin override. Fills all pending night actions with null (sleep)
     // then immediately resolves the night. Bypasses isAlive check.
-    socket.on('force_end_night', ({ roomCode, playerId }) => {
+    on('force_end_night', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.phase !== 'night') return;
@@ -841,7 +894,7 @@ function setupSocketHandlers(io) {
     // ── begin_voting ────────────────────────────────────────────────────────
     // Host-only. Advances day_announce(night) → day_vote.
     // Mirrors advance_to_vote but bypasses the isAlive check.
-    socket.on('begin_voting', ({ roomCode, playerId }) => {
+    on('begin_voting', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.hostId !== playerId) return;
@@ -875,7 +928,7 @@ function setupSocketHandlers(io) {
     // ── force_end_vote ──────────────────────────────────────────────────────
     // Host-only admin override. Fills all non-votes with null (abstain)
     // then immediately resolves the vote. Bypasses isAlive check.
-    socket.on('force_end_vote', ({ roomCode, playerId }) => {
+    on('force_end_vote', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.phase !== 'day_vote') return;
@@ -897,7 +950,7 @@ function setupSocketHandlers(io) {
     // ── restart_game ────────────────────────────────────────────────────────
     // Host-only. Resets per-game state back to lobby while keeping players
     // and config intact. Triggers lobby navigation on all clients.
-    socket.on('restart_game', ({ roomCode, playerId }) => {
+    on('restart_game', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room) return;
@@ -908,6 +961,8 @@ function setupSocketHandlers(io) {
       room.phase = 'lobby';
       room.round = 0;
       room.winner = null;
+      room.gameOverReason = null;
+      room.gameOverJesterName = null;
       room.announceType = null;
       room.lastResolution = null;
 
@@ -938,7 +993,7 @@ function setupSocketHandlers(io) {
 
     // ── kick_player ────────────────────────────────────────────────────────
     // Host-only, lobby-phase only. Kicks target player and removes from room.
-    socket.on('kick_player', ({ roomCode, playerId, targetId }) => {
+    on('kick_player', ({ roomCode, playerId, targetId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.hostId !== playerId || room.phase !== 'lobby') return;
@@ -964,7 +1019,7 @@ function setupSocketHandlers(io) {
 
     // ── promote_host ───────────────────────────────────────────────────────
     // Host-only. Transfers room host privileges to target player.
-    socket.on('promote_host', ({ roomCode, playerId, targetId }) => {
+    on('promote_host', ({ roomCode, playerId, targetId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || room.hostId !== playerId) return;
@@ -978,7 +1033,7 @@ function setupSocketHandlers(io) {
 
     // ── leave_game ─────────────────────────────────────────────────────────
     // Voluntary player quit (lobby = remove; active game = eliminate).
-    socket.on('leave_game', ({ roomCode, playerId }) => {
+    on('leave_game', ({ roomCode, playerId }) => {
       const code = String(roomCode || '').toUpperCase();
       const room = rooms.get(code);
       if (!room || !room.players.has(playerId)) return;
@@ -1028,6 +1083,7 @@ function setupSocketHandlers(io) {
         room.nightActions.delete(playerId);
         room.votes.delete(playerId);
         room.endGameVotes.delete(playerId);
+        refreshBoss(io, room);
 
         // Check if active game should instantly end (e.g. last imposter fled)
         if (room.phase !== 'game_over') {

@@ -235,10 +235,12 @@ export default function DecoyTapper() {
   const handleSelectTarget = useCallback(
     (player: PublicPlayer) => {
       if (uiPhase !== 'choosing') return;
+      // Imposters can't target teammates — ignore silently so tiles stay visually neutral
+      if (role === 'imposter' && myRole?.teammates.some((t) => t.id === player.id)) return;
       // Toggle selection or select new target
       setSelectedTargetId((prev) => (prev === player.id ? null : player.id));
     },
-    [uiPhase]
+    [uiPhase, role, myRole]
   );
 
   const handleSubmitAction = useCallback(() => {

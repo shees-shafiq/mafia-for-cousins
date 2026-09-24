@@ -31,7 +31,7 @@ function LandingContent() {
   const { createRoom, joinRoom, roomCode, error, clearError, isConnected } = useSocket();
 
   // Read ?code= from URL (set by QR / direct-link flow)
-  const prefilledCode = (searchParams.get('code') ?? '').toUpperCase().slice(0, 4);
+  const prefilledCode = (searchParams.get('code') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 
   const [view, setView] = useState<View>(prefilledCode ? 'join' : 'home');
   const [name, setName] = useState('');
@@ -267,9 +267,9 @@ function LandingContent() {
                 ref={codeRef}
                 type="text"
                 value={code}
-                maxLength={4}
+                maxLength={6}
                 onChange={(e) => {
-                  setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''));
+                  setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
                   setLocalError('');
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && handleJoin()}

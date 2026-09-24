@@ -12,13 +12,14 @@ export default function ResolutionAnnouncement() {
   const announceType = roomState?.announceType;
   const config = roomState?.config;
 
-  // Pick the right resolution data
+  // Pick the right resolution data. Fall back to the server snapshot so a
+  // refreshed page shows the real result instead of "nobody died".
   const resolution =
-    announceType === 'night'
+    (announceType === 'night'
       ? nightResolution
       : announceType === 'vote'
       ? voteResolution
-      : null;
+      : null) ?? roomState?.lastResolution ?? null;
 
   const isNight = announceType === 'night';
 

@@ -189,6 +189,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setPlayerId(data.playerId);
       setRoomCode(data.roomCode);
       setRoomState(data.roomState);
+
+      // Rebuild night progress after a refresh — the server only re-sends
+      // decoys / awaiting_action for players who haven't finished yet.
+      const me = data.roomState.players.find((p) => p.id === data.playerId);
+      if (data.roomState.phase === 'night' && me) {
+        setIsDecoysComplete(me.hasCompletedDecoys);
+        setIsActionSubmitted(me.hasSubmittedAction);
+      }
     };
 
     const onSessionInvalid = ({ message }: { message: string }) => {
