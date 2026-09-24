@@ -17,6 +17,7 @@ import SpectatorView from '@/components/SpectatorView';
 import RolePeekFAB from '@/components/RolePeekFAB';
 import HostControls from '@/components/HostControls';
 import LeaveButton from '@/components/LeaveButton';
+import NewsTicker from '@/components/NewsTicker';
 
 // ─── Loading / Expired Screen ────────────────────────────────────────────────
 function LoadingScreen({
@@ -94,7 +95,7 @@ function GameHeader({
       : '🎮 In Game';
 
   return (
-    <div className="w-full flex justify-between items-center px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 backdrop-blur-md sticky top-0 z-40 select-none">
+    <div className="w-full flex justify-between items-center px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 backdrop-blur-md select-none">
       {/* Left: Leave Button */}
       <div className="flex items-center justify-start flex-1 min-w-0">
         <LeaveButton isGameActive={isGameActive} />
@@ -222,14 +223,17 @@ export default function GamePage() {
 
   return (
     <div className="min-h-dvh flex flex-col">
-      {/* Global fluid flexbox header */}
-      <GameHeader
-        roomState={roomState}
-        isHost={isHost}
-        isGameActive={phase !== 'game_over'}
-        onForceNight={handleForceNight}
-        onForceVote={handleForceVote}
-      />
+      {/* Global fluid flexbox header + Ghost News ticker (sticky together) */}
+      <div className="sticky top-0 z-40">
+        <GameHeader
+          roomState={roomState}
+          isHost={isHost}
+          isGameActive={phase !== 'game_over'}
+          onForceNight={handleForceNight}
+          onForceVote={handleForceVote}
+        />
+        <NewsTicker />
+      </div>
 
       {/* Main phase view */}
       <div className="flex-1 flex flex-col">

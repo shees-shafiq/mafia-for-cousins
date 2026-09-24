@@ -120,3 +120,26 @@ export interface ActionPhaseStartPayload {
   decoyTargetIds: string[];
   phase: 'night';
 }
+
+// ─── Ghost interactions (eliminated players) ──────────────────────────────────
+// Keep in sync with backend/gameManager.js
+
+export const REACTION_EMOJIS = ['😂', '😱', '👀', '🤡', '💀', '🔥', '🙏', '🤔'] as const;
+export const NEWS_MAX_LENGTH = 90;
+
+/** A floating emoji rising from a ghost's tile */
+export interface GhostReaction {
+  id: string;
+  playerId: string;
+  emoji: string;
+}
+
+/** A ghost-news message waiting to scroll across the ticker */
+export interface NewsItem {
+  id: string;
+  playerId: string;
+  name: string;
+  color: string;
+  text: string;
+  round: number;
+}

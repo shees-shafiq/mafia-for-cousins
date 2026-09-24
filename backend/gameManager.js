@@ -18,6 +18,13 @@ const {
 /** @type {Map<string, RoomState>} */
 const rooms = new Map();
 
+// ─── Ghost interaction limits (eliminated players) ───────────────────────────
+// Keep in sync with frontend/types/game.ts
+const REACTION_EMOJIS = ['😂', '😱', '👀', '🤡', '💀', '🔥', '🙏', '🤔'];
+const REACTION_COOLDOWN_MS = 700;
+const NEWS_MAX_LENGTH = 90;
+const GHOST_PHASES = ['night', 'day_announce', 'day_vote'];
+
 // ─── Room code generation ─────────────────────────────────────────────────────
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I or O to avoid confusion
 
@@ -401,6 +408,7 @@ function setupSocketHandlers(io) {
         decoySequences: new Map(),
         votes: new Map(),
         endGameVotes: new Set(),
+        newsPostedRound: new Map(), // playerId → round they last posted ghost news
         winner: null,
         announceType: null,
         lastResolution: null,
@@ -615,6 +623,7 @@ function setupSocketHandlers(io) {
 
       room.phase = 'role_reveal';
       room.round = 1;
+      room.newsPostedRound.clear();
 
       // Send each player their private role — never broadcast the full map
       for (const player of room.players.values()) {
@@ -947,6 +956,54 @@ function setupSocketHandlers(io) {
       resolveVotePhase(io, room);
     });
 
+    // ── send_reaction ───────────────────────────────────────────────────────
+    // Eliminated players only. Broadcasts a floating emoji from their tile.
+    on('send_reaction', ({ roomCode, playerId, emoji }) => {
+      const code = String(roomCode || '').toUpperCase();
+      const room = rooms.get(code);
+      if (!room || !GHOST_PHASES.includes(room.phase)) return;
+
+      const player = room.players.get(playerId);
+      if (!player || player.isAlive || player.socketId !== socket.id) return;
+      if (!REACTION_EMOJIS.includes(emoji)) return;
+
+      // Light rate limit so one ghost can't flood everyone's screen
+      const now = Date.now();
+      if (player.lastReactionAt && now - player.lastReactionAt < REACTION_COOLDOWN_MS) return;
+      player.lastReactionAt = now;
+
+      io.to(code).emit('reaction', { id: uuidv4(), playerId, emoji });
+    });
+
+    // ── post_news ───────────────────────────────────────────────────────────
+    // Eliminated players only. One ticker message per player per round.
+    on('post_news', ({ roomCode, playerId, text }) => {
+      const code = String(roomCode || '').toUpperCase();
+      const room = rooms.get(code);
+      if (!room || !GHOST_PHASES.includes(room.phase)) return;
+
+      const player = room.players.get(playerId);
+      if (!player || player.isAlive || player.socketId !== socket.id) return;
+
+      const message = String(text || '').replace(/\s+/g, ' ').trim().slice(0, NEWS_MAX_LENGTH);
+      if (!message) return;
+
+      if (room.newsPostedRound.get(playerId) === room.round) {
+        socket.emit('error_event', { message: 'You already posted news this round.' });
+        return;
+      }
+      room.newsPostedRound.set(playerId, room.round);
+
+      io.to(code).emit('news_posted', {
+        id: uuidv4(),
+        playerId,
+        name: player.name,
+        color: player.color,
+        text: message,
+        round: room.round,
+      });
+    });
+
     // ── restart_game ────────────────────────────────────────────────────────
     // Host-only. Resets per-game state back to lobby while keeping players
     // and config intact. Triggers lobby navigation on all clients.
@@ -972,6 +1029,7 @@ function setupSocketHandlers(io) {
       room.decoyComplete.clear();
       room.decoySequences.clear();
       room.endGameVotes.clear();
+      room.newsPostedRound.clear();
 
       // Reset per-player game state (keep name, color, animal, id)
       for (const player of room.players.values()) {

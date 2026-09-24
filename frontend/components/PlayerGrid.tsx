@@ -1,9 +1,10 @@
 'use client';
 
 import { useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { WifiOff } from 'lucide-react';
-import type { PublicPlayer } from '@/types/game';
+import { useSocket } from '@/context/SocketContext';
+import type { PublicPlayer, GhostReaction } from '@/types/game';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,7 @@ function PlayerTile({
   myVoteId,
   onTap,
   onLongPress,
+  reactions,
 }: {
   player: PublicPlayer;
   idx: number;
@@ -91,6 +93,7 @@ function PlayerTile({
   myVoteId?: string;
   onTap?: (player: PublicPlayer) => void;
   onLongPress?: (player: PublicPlayer) => void;
+  reactions: GhostReaction[];
 }) {
   const variant = getTileVariant(player, mode, highlightId, activeIds, selectedId, myVoteId);
   const isDecoyTarget = variant === 'decoy';
@@ -143,6 +146,9 @@ function PlayerTile({
   };
 
   return (
+    // Wrapper hosts the reaction layer OUTSIDE the button, so dead tiles'
+    // reduced opacity doesn't fade the floating emojis too.
+    <div className="relative">
     <motion.button
       type="button"
       disabled={!isInteractive}
@@ -158,7 +164,7 @@ function PlayerTile({
       transition={{ delay: idx * 0.04, duration: 0.25 }}
       whileTap={isInteractive ? { scale: 0.94 } : {}}
       className={[
-        'relative flex flex-col items-center justify-center gap-1.5',
+        'relative w-full h-full flex flex-col items-center justify-center gap-1.5',
         'rounded-2xl border-2 p-3 text-center select-none',
         'transition-all duration-200',
         isDead
@@ -255,7 +261,33 @@ function PlayerTile({
         <span className="absolute top-1 right-1.5 text-xs" title="Host">👑</span>
       )}
     </motion.button>
+
+      {/* Ghost reactions — float up from the tile and fade out */}
+      <div className="pointer-events-none absolute inset-x-0 top-1/3 flex justify-center z-20">
+        <AnimatePresence>
+          {reactions.map((r) => (
+            <motion.span
+              key={r.id}
+              initial={{ y: 0, opacity: 1, scale: 0.6, x: reactionDrift(r.id) }}
+              animate={{ y: -64, opacity: 0, scale: 1.3 }}
+              transition={{ duration: 1.5, ease: 'easeOut' }}
+              className="absolute text-3xl drop-shadow-lg"
+              aria-hidden
+            >
+              {r.emoji}
+            </motion.span>
+          ))}
+        </AnimatePresence>
+      </div>
+    </div>
   );
+}
+
+/** Small deterministic sideways offset so rapid reactions don't stack exactly */
+function reactionDrift(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return (Math.abs(h) % 33) - 16;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -272,6 +304,8 @@ export default function PlayerGrid({
   onTap,
   onLongPress,
 }: PlayerGridProps) {
+  const { reactions } = useSocket();
+
   return (
     <div className="grid grid-cols-2 gap-3 w-full">
       {players.map((player, idx) => (
@@ -288,6 +322,7 @@ export default function PlayerGrid({
           myVoteId={myVoteId}
           onTap={onTap}
           onLongPress={onLongPress}
+          reactions={reactions.filter((r) => r.playerId === player.id)}
         />
       ))}
     </div>

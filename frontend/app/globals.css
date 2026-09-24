@@ -193,3 +193,21 @@ body {
   transform-origin: center;
   transform: rotate(-90deg);
 }
+
+/* ─── Ghost News ticker ───────────────────────────────────────────────────── */
+/* padding-left: 100% starts the text just off the right edge; translating by
+   -100% of the element's own width carries it fully off the left edge. */
+@keyframes tickerScroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}
+
+.ticker-track {
+  display: inline-block;
+  white-space: nowrap;
+  padding-left: 100%;
+  animation-name: tickerScroll;
+  animation-timing-function: linear;
+  animation-iteration-count: 1;
+  animation-fill-mode: forwards;
+}

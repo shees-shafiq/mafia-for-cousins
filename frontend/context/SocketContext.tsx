@@ -16,7 +16,12 @@ import type {
   VoteResolution,
   GameOverInfo,
   GameConfig,
+  GhostReaction,
+  NewsItem,
 } from '@/types/game';
+
+/** How long a floating reaction stays mounted (animation is 1.5s) */
+const REACTION_LIFETIME_MS = 1600;
 
 // ─── Socket URL ───────────────────────────────────────────────────────────────
 const SOCKET_URL =
@@ -71,6 +76,10 @@ interface SocketContextValue {
   endGameVoteRequired: number;
   voteProgress: { votesCast: number; totalNeeded: number } | null;
 
+  reactions: GhostReaction[];
+  newsQueue: NewsItem[];
+  lastNewsRound: number | null;
+
   error: string | null;
   setError: (e: string | null) => void;
   clearError: () => void;
@@ -88,6 +97,9 @@ interface SocketContextValue {
   kickPlayer: (targetId: string) => void;
   promoteHost: (targetId: string) => void;
   leaveGame: () => void;
+  sendReaction: (emoji: string) => void;
+  postNews: (text: string) => void;
+  dismissNews: (id: string) => void;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -119,6 +131,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [endGameVoteCount, setEndGameVoteCount] = useState(0);
   const [endGameVoteRequired, setEndGameVoteRequired] = useState(0);
   const [voteProgress, setVoteProgress] = useState<{ votesCast: number; totalNeeded: number } | null>(null);
+
+  const [reactions, setReactions] = useState<GhostReaction[]>([]);
+  const [newsQueue, setNewsQueue] = useState<NewsItem[]>([]);
+  const [lastNewsRound, setLastNewsRound] = useState<number | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const clearError = useCallback(() => setError(null), []);
@@ -245,6 +261,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         setGameOverInfo(null);
         setEndGameVoteCount(0);
         setEndGameVoteRequired(0);
+        setNewsQueue([]);
+        setLastNewsRound(null);
       }
     };
 
@@ -353,6 +371,19 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setVoteProgress(data);
     };
 
+    // ── Ghost interactions ────────────────────────────────────────────────
+    const onReaction = (reaction: GhostReaction) => {
+      setReactions((prev) => [...prev, reaction]);
+      setTimeout(() => {
+        setReactions((prev) => prev.filter((r) => r.id !== reaction.id));
+      }, REACTION_LIFETIME_MS);
+    };
+
+    const onNewsPosted = (item: NewsItem) => {
+      setNewsQueue((prev) => [...prev, item]);
+      if (item.playerId === playerIdRef.current) setLastNewsRound(item.round);
+    };
+
     // ── Register all handlers ─────────────────────────────────────────────
     s.on('connect', onConnect);
     s.on('disconnect', onDisconnect);
@@ -376,6 +407,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     s.on('victory_votes_update', onVictoryVotesUpdate);
     s.on('game_over', onGameOver);
     s.on('error_event', onErrorEvent);
+    s.on('reaction', onReaction);
+    s.on('news_posted', onNewsPosted);
 
     const onKickedFromRoom = () => {
       clearSession();
@@ -422,6 +455,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       s.off('game_over', onGameOver);
       s.off('kicked_from_room', onKickedFromRoom);
       s.off('error_event', onErrorEvent);
+      s.off('reaction', onReaction);
+      s.off('news_posted', onNewsPosted);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -505,6 +540,21 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     window.location.href = '/';
   }, [emit]);
 
+  const sendReaction = useCallback(
+    (emoji: string) => emit('send_reaction', { emoji }),
+    [emit]
+  );
+
+  const postNews = useCallback(
+    (text: string) => emit('post_news', { text }),
+    [emit]
+  );
+
+  const dismissNews = useCallback(
+    (id: string) => setNewsQueue((prev) => prev.filter((n) => n.id !== id)),
+    []
+  );
+
   // ─── Context value ─────────────────────────────────────────────────────────
   const value: SocketContextValue = {
     socket,           // React state — properly triggers re-renders
@@ -522,6 +572,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     endGameVoteCount,
     endGameVoteRequired,
     voteProgress,
+    reactions,
+    newsQueue,
+    lastNewsRound,
     error,
     setError,
     clearError,
@@ -538,6 +591,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     kickPlayer,
     promoteHost,
     leaveGame,
+    sendReaction,
+    postNews,
+    dismissNews,
   };
 
   return (
