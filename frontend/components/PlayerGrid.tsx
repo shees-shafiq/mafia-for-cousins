@@ -223,8 +223,9 @@ function PlayerTile({
       )}
 
       {/* Vote count badge */}
-      {mode === 'vote' && voteCount > 0 && (
+      {(mode === 'vote' || mode === 'spectate') && voteCount > 0 && (
         <motion.span
+          key={`vote-${player.id}-${voteCount}`}
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           className="absolute -top-2 -right-2 min-w-[22px] h-[22px] px-1
@@ -244,8 +245,8 @@ function PlayerTile({
         <span className="absolute top-1.5 left-2 text-accent-violet-light font-bold text-xs">✓</span>
       )}
 
-      {/* Submitted indicator */}
-      {(mode === 'decoy' || mode === 'target') && player.hasSubmittedAction && !isDead && (
+      {/* Submitted indicator (Night phase only) */}
+      {(mode === 'decoy' || mode === 'target' || mode === 'disabled') && player.hasSubmittedAction && !isDead && (
         <span className="absolute bottom-1 right-1.5 w-1.5 h-1.5 rounded-full bg-accent-green" />
       )}
 

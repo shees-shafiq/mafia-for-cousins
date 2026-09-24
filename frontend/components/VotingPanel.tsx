@@ -150,7 +150,7 @@ export default function VotingPanel() {
       <div className={`flex-1 px-5 pb-36 transition-opacity duration-300 ${isAlreadyVoted ? 'opacity-85' : 'opacity-100'}`}>
         <PlayerGrid
           players={players}
-          mode={iAmAlive && !isAlreadyVoted ? 'vote' : 'spectate'}
+          mode="vote"
           myId={playerId ?? undefined}
           voteCounts={voteCounts}
           myVoteId={selectedVoteId ?? undefined}
